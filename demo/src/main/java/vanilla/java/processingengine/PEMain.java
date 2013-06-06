@@ -50,7 +50,8 @@ public class PEMain {
         }
 
         long prevProcessed = 0, count = 0;
-        while (true) {
+        //noinspection InfiniteLoopStatement
+        do {
             boolean readOne = false;
             for (Gw2PeReader reader : readers) {
                 readOne |= reader.readOne();
@@ -66,16 +67,15 @@ public class PEMain {
                     prevProcessed = processed;
                 }
             }
-        }
+        } while (true);
     }
 
-    private static class PEEvents implements Gw2PeEvents {
+    static class PEEvents implements Gw2PeEvents {
         private final Pe2GwWriter pe2GwWriter;
-        public SmallReport smallReport;
+        private final SmallReport smallReport = new SmallReport();
 
         public PEEvents(Pe2GwWriter pe2GwWriter) {
             this.pe2GwWriter = pe2GwWriter;
-            smallReport = new SmallReport();
         }
 
         @Override

@@ -19,6 +19,8 @@ package com.higherfrequencytrading.chronicle.tools;
 import sun.reflect.Reflection;
 
 import java.io.*;
+import java.nio.ByteBuffer;
+import java.nio.channels.SocketChannel;
 import java.nio.charset.Charset;
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -61,6 +63,11 @@ public enum IOTools {
      * @throws IOException If the file was not found, or the GZIP Stream was corrupt.
      */
     public static InputStream asStream(String name) throws IOException {
+        ClassLoader classLoader = Reflection.getCallerClass(3).getClassLoader();
+        return asStream(name, classLoader);
+    }
+
+    public static InputStream asStream(String name, ClassLoader classLoader) throws IOException {
         String name2 = normalisePath(name);
         if (name2.startsWith("="))
             return new ByteArrayInputStream(name2.getBytes(UTF_8));
@@ -68,7 +75,7 @@ public enum IOTools {
         try {
             in = new FileInputStream(name2);
         } catch (FileNotFoundException e) {
-            in = Reflection.getCallerClass(3).getClassLoader().getResourceAsStream(name2);
+            in = classLoader.getResourceAsStream(name2);
             if (in == null)
                 throw e;
         }
@@ -86,7 +93,8 @@ public enum IOTools {
      * @throws IOException if the file was not found or the stream was corrupt.
      */
     public static BufferedReader asReader(String name) throws IOException {
-        return new BufferedReader(new InputStreamReader(asStream(name), UTF_8));
+        ClassLoader classLoader = Reflection.getCallerClass(3).getClassLoader();
+        return new BufferedReader(new InputStreamReader(asStream(name, classLoader), UTF_8));
     }
 
     /**
@@ -102,5 +110,28 @@ public enum IOTools {
         prop.load(br);
         br.close();
         return prop;
+    }
+
+    public static void writeAllOrEOF(SocketChannel sc, ByteBuffer bb) throws IOException {
+        writeAll(sc, bb);
+
+        if (bb.remaining() > 0) throw new EOFException();
+    }
+
+    public static void writeAll(SocketChannel sc, ByteBuffer bb) throws IOException {
+        while (bb.remaining() > 0)
+            if (sc.write(bb) < 0)
+                break;
+    }
+
+    public static void readFullyOrEOF(SocketChannel socket, ByteBuffer bb) throws IOException {
+        readAvailable(socket, bb);
+        if (bb.remaining() > 0) throw new EOFException();
+    }
+
+    public static void readAvailable(SocketChannel socket, ByteBuffer bb) throws IOException {
+        while (bb.remaining() > 0)
+            if (socket.read(bb) < 0)
+                break;
     }
 }

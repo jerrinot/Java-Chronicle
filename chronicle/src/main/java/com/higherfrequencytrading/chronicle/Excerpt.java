@@ -95,7 +95,7 @@ public interface Excerpt extends RandomDataInput, RandomDataOutput, ByteStringAp
     /**
      * Start a new excerpt in the Chronicle.
      *
-     * @param capacity minimum capacity to allow for.
+     * @param capacity maximum excerpt capacity in bytes.
      */
     void startExcerpt(int capacity);
 
@@ -156,15 +156,9 @@ public interface Excerpt extends RandomDataInput, RandomDataOutput, ByteStringAp
     <E> void readEnums(Class<E> eClass, List<E> eList);
 
     /**
-     * @deprecated replaced with readEnums(Class, List) in version 1.8
-     */
-    @Deprecated
-    <E> List<E> readEnums(Class<E> eClass);
-
-    /**
      * Read a collection of any serializable type.
      */
-    void readList(Collection list);
+    <E> void readList(Collection<E> list);
 
     /**
      * Reads a map of key/values with known enumerated types.
@@ -177,4 +171,19 @@ public interface Excerpt extends RandomDataInput, RandomDataOutput, ByteStringAp
      * @return last index + 1
      */
     long size();
+
+    /**
+     * Wind to the start
+     */
+    Excerpt toStart();
+
+    /**
+     * Wind tot he end
+     */
+    Excerpt toEnd();
+
+    /**
+     * @return has the Except just been created or finish() has been called
+     */
+    boolean isFinished();
 }

@@ -99,7 +99,9 @@ public class IndexedChronicle extends AbstractChronicle {
         // find the last record.
         long indexSize = indexChannel.size() >>> indexBitSize();
         if (indexSize > 0) {
-            while (--indexSize > 0 && getIndexData(indexSize) == 0) ;
+            indexSize--;
+            while (indexSize > 0 && getIndexData(indexSize) == 0)
+                indexSize--;
             logger.info(basePath + ", size=" + indexSize);
             size = indexSize;
         } else {
@@ -171,14 +173,23 @@ public class IndexedChronicle extends AbstractChronicle {
                 return lastIndexBuffer;
 
         } else {
-            while (indexBuffers.size() <= indexBufferId) indexBuffers.add(null);
+            if (indexBuffers.size() <= indexBufferId)
+                fillIndexBufferWithNulls(indexBufferId);
             MappedByteBuffer buffer = indexBuffers.get(indexBufferId);
             if (buffer != null)
                 return buffer;
         }
+        return createIndexBuffer(startPosition, indexBufferId);
+    }
+
+    private void fillIndexBufferWithNulls(int indexBufferId) {
+        while (indexBuffers.size() <= indexBufferId) indexBuffers.add(null);
+    }
+
+    private MappedByteBuffer createIndexBuffer(long startPosition, int indexBufferId) {
         try {
 //            long start = System.nanoTime();
-            MappedByteBuffer mbb = null;
+            MappedByteBuffer mbb;
             try {
                 mbb = indexChannel.map(FileChannel.MapMode.READ_WRITE, startPosition & ~indexLowMask, 1 << indexBitSize);
             } catch (OutOfMemoryError e) {
@@ -210,13 +221,22 @@ public class IndexedChronicle extends AbstractChronicle {
                 return lastDataBuffer;
             }
         } else {
-            while (dataBuffers.size() <= dataBufferId) dataBuffers.add(null);
+            if (dataBuffers.size() <= dataBufferId)
+                fillDataBuffersWithNulls(dataBufferId);
             MappedByteBuffer buffer = dataBuffers.get(dataBufferId);
             if (buffer != null)
                 return buffer;
         }
+        return createDataBuffer(startPosition, dataBufferId);
+    }
+
+    private void fillDataBuffersWithNulls(int dataBufferId) {
+        while (dataBuffers.size() <= dataBufferId) dataBuffers.add(null);
+    }
+
+    private MappedByteBuffer createDataBuffer(long startPosition, int dataBufferId) {
         try {
-            MappedByteBuffer mbb = null;
+            MappedByteBuffer mbb;
             try {
                 mbb = dataChannel.map(FileChannel.MapMode.READ_WRITE, startPosition & ~dataLowMask, 1 << dataBitSize);
             } catch (OutOfMemoryError e) {

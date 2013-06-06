@@ -83,7 +83,7 @@ public class ListWrapper<E> implements ObservableList<E> {
     }
 
     public void setAnnotations(Annotation[] annotations) {
-        this.annotations = annotations;
+        this.annotations = Arrays.copyOf(annotations, annotations.length);
     }
 
     @SuppressWarnings("unchecked")
@@ -212,7 +212,7 @@ public class ListWrapper<E> implements ObservableList<E> {
     @Override
     public ListIterator<E> listIterator(final int index) {
         return new ListIterator<E>() {
-            ListIterator<E> iter = underlying.listIterator(index);
+            final ListIterator<E> iter = underlying.listIterator(index);
             E last = null;
 
             @Override
@@ -450,9 +450,7 @@ public class ListWrapper<E> implements ObservableList<E> {
             if (!c.contains(e))
                 toremove.add(e);
         }
-        if (toremove.isEmpty())
-            return false;
-        return removeAll(toremove);
+        return !toremove.isEmpty() && removeAll(toremove);
     }
 
     @Override
@@ -635,7 +633,7 @@ public class ListWrapper<E> implements ObservableList<E> {
         long eventId = excerpt.index();
         excerpt.writeEnum(add);
         excerpt.writeInt(offset + index);
-        writeElement(excerpt, (E) element);
+        writeElement(excerpt, element);
         excerpt.finish();
         if (!notifyOff && !listeners.isEmpty()) {
             for (int i = 0; i < listeners.size(); i++) {

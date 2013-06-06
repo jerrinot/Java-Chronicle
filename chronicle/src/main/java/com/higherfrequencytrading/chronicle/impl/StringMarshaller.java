@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package com.higherfrequencytrading.chronicle.impl;
 
 import com.higherfrequencytrading.chronicle.EnumeratedMarshaller;
@@ -22,22 +23,23 @@ import com.higherfrequencytrading.chronicle.StopCharTester;
 /**
  * @author peter.lawrey
  */
-public class StringMarshaller implements EnumeratedMarshaller<String> {
-    private final String[] interner;
+public class StringMarshaller implements EnumeratedMarshaller<CharSequence> {
+    private final int size1;
+    private String[] interner;
 
     public StringMarshaller(int size) {
         int size2 = 128;
         while (size2 < size && size2 < (1 << 20)) size2 <<= 1;
-        interner = new String[size2];
+        this.size1 = size2 - 1;
     }
 
     @Override
-    public Class<String> classMarshaled() {
-        return String.class;
+    public Class<CharSequence> classMarshaled() {
+        return CharSequence.class;
     }
 
     @Override
-    public void write(Excerpt excerpt, String s) {
+    public void write(Excerpt excerpt, CharSequence s) {
         excerpt.writeUTF(s);
     }
 
@@ -59,6 +61,9 @@ public class StringMarshaller implements EnumeratedMarshaller<String> {
 
     private String builderToString() {
         int idx = hashFor(reader);
+        if (interner == null)
+            interner = new String[size1 + 1];
+
         String s2 = interner[idx];
         if (s2 != null && s2.length() == reader.length())
             NOT_FOUND:{
@@ -72,13 +77,13 @@ public class StringMarshaller implements EnumeratedMarshaller<String> {
     }
 
     private int hashFor(CharSequence cs) {
-        int h = 0;
+        long h = 0;
 
         for (int i = 0, length = cs.length(); i < length; i++)
             h = 31 * h + cs.charAt(i);
 
-        h ^= (h >>> 20) ^ (h >>> 12);
-        h ^= (h >>> 7) ^ (h >>> 4);
-        return h & (interner.length - 1);
+        h ^= (h >>> 41) ^ (h >>> 20);
+        h ^= (h >>> 14) ^ (h >>> 7);
+        return (int) (h & size1);
     }
 }

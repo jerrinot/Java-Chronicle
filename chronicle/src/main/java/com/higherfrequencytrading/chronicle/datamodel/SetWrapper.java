@@ -71,7 +71,7 @@ public class SetWrapper<E> implements ObservableSet<E> {
     }
 
     public void setAnnotations(Annotation[] annotations) {
-        this.annotations = annotations;
+        this.annotations = Arrays.copyOf(annotations, annotations.length);
     }
 
     @SuppressWarnings("unchecked")
@@ -146,7 +146,7 @@ public class SetWrapper<E> implements ObservableSet<E> {
     @Override
     public Iterator<E> iterator() {
         return new Iterator<E>() {
-            Iterator<E> iter = underlying.iterator();
+            final Iterator<E> iter = underlying.iterator();
             E last = null;
 
             @Override
@@ -294,9 +294,7 @@ public class SetWrapper<E> implements ObservableSet<E> {
             if (!c.contains(e))
                 toremove.add(e);
         }
-        if (toremove.isEmpty())
-            return false;
-        return removeAll(toremove);
+        return !toremove.isEmpty() && removeAll(toremove);
     }
 
     @Override

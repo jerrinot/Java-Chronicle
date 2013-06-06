@@ -1,3 +1,4 @@
+#Chronicle
 This library is an ultra low latency, high throughput, persisted, messaging and event driven in memory database.  The typical latency is as low as 80 nano-seconds and supports throughputs of 5-20 million messages/record updates per second.
 
 This library also supports distributed, durable, observable collections (Map, List, Set)  The performance depends on the data structures used, but simple data structures can achieve throughputs of 5 million elements or key/value pairs in batches (eg addAll or putAll) and 500K elements or key/values per second when added/updated/removed individually.
@@ -6,24 +7,102 @@ It uses almost no heap, trivial GC impact, can be much larger than your physical
 It can change the way you design your system because it allows you to have independent processes which can be running or not at the same time (as no messages are lost)  This is useful for restarting services and testing your services from canned data. e.g. like sub-microsecond durable messaging.
 You can attach any number of readers, including tools to see the exact state of the data externally. e.g. I use; od -t cx1 {file}  to see the current state.
 
-===================================
-Support Group
-===================================
+#Example
+```java
+public static void main(String... ignored) throws IOException {
+    final String basePath = System.getProperty("java.io.tmpdir") + File.separator + "test";
+    ChronicleTools.deleteOnExit(basePath);
+    final int[] consolidates = new int[]{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
+    final int warmup = 500000;
+    final int repeats = 20000000;
+    //Write
+    Thread t = new Thread(new Runnable() {
+        @Override
+        public void run() {
+            try {
+                final IndexedChronicle chronicle = new IndexedChronicle(basePath);
+                chronicle.useUnsafe(true); // for benchmarks.
+                final Excerpt excerpt = chronicle.createExcerpt();
+                for (int i = -warmup; i < repeats; i++) {
+                    doSomeThinking();
+                    excerpt.startExcerpt(8 + 4 + 4 * consolidates.length);
+                    excerpt.writeLong(System.nanoTime());
+                    excerpt.writeUnsignedShort(consolidates.length);
+                    for (final int consolidate : consolidates) {
+                        excerpt.writeStopBit(consolidate);
+                    }
+                    excerpt.finish();
+                }
+                chronicle.close();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+
+        private void doSomeThinking() {
+            // real programs do some work between messages
+            // this has an impact on the worst case latencies.
+            Thread.yield();
+        }
+    });
+    t.start();
+    //Read
+    final IndexedChronicle chronicle = new IndexedChronicle(basePath);
+    chronicle.useUnsafe(true); // for benchmarks.
+    final Excerpt excerpt = chronicle.createExcerpt();
+    int[] times = new int[repeats];
+    for (int count = -warmup; count < repeats; count++) {
+        while (!excerpt.nextIndex()) {
+        /* busy wait */
+        }
+        final long timestamp = excerpt.readLong();
+        long time = System.nanoTime() - timestamp;
+        if (count >= 0)
+            times[count] = (int) time;
+        final int nbConsolidates = excerpt.readUnsignedShort();
+        assert nbConsolidates == consolidates.length;
+        for (int i = 0; i < nbConsolidates; i++) {
+            excerpt.readStopBit();
+        }
+        excerpt.finish();
+    }
+    Arrays.sort(times);
+    for (double perc : new double[]{50, 90, 99, 99.9, 99.99}) {
+        System.out.printf("%s%% took %.1f µs, ", perc, times[((int) (repeats * perc / 100))] / 1000.0);
+    }
+    System.out.printf("worst took %d µs%n", times[times.length - 1] / 1000);
+    chronicle.close();
+}
+```
+prints an output like (note: this test does 20 million in a matter of seconds and the first half a million is for warming up)
+
+```
+50.0% took 0.3 µs, 90.0% took 0.4 µs, 99.0% took 33.5 µs, 99.9% took 66.9 µs, 99.99% took 119.7 µs, worst took 183 µs
+50.0% took 0.4 µs, 90.0% took 0.5 µs, 99.0% took 0.6 µs, 99.9% took 9.3 µs, 99.99% took 60.1 µs, worst took 883 µs
+50.0% took 0.3 µs, 90.0% took 0.4 µs, 99.0% took 0.6 µs, 99.9% took 21.9 µs, 99.99% took 62.0 µs, worst took 234 µs
+50.0% took 0.3 µs, 90.0% took 0.4 µs, 99.0% took 0.6 µs, 99.9% took 9.3 µs, 99.99% took 55.8 µs, worst took 199 µs
+```
+
+#Support Group
 https://groups.google.com/forum/?fromgroups#!forum/java-chronicle
 
-===================================
-Software used to Develop this package
-===================================
-YourKit 11.x - http://www.yourkit.com -  If you don't profile the performance of you application, you are just guessing where the performance bottlenecks are.
+#Software used to Develop this package
+YourKit 11.x - http://www.yourkit.com -  If you don't profile the performance of your application, you are just guessing where the performance bottlenecks are.
 
 IntelliJ CE - http://www.jetbrains.com - My favourite IDE.
 
-===================================
-Version History
-===================================
 
-Version 1.7 - Add support for arbitrary events to sent such as timestamps, heartbeats, changes in stages which can picked up by listeners.
-           Add support for arbitrary annotations to be added to the data model so each map/collection can have additional configuration
+#Version History
+
+Version 1.8 - Add MutableDecimal and FIX support.
+
+Version 1.7.1 - Bug fix and OGSi support.
+           Sonar and IntelliJ code analysis - thank you, Mani.
+           Add appendDate and appendDateTime
+           Improved performance for appendLong and appendDouble (Thank you Andrew Bissell)
+
+Version 1.7 - Add support to the DataModel for arbitrary events to be sent such as timestamps, heartbeats, changes in stages which can picked up by listeners.
+           Add support for the DataModel for arbitrary annotations on the data so each map/collection can have additional configuration
            Add ConfigProperties which is scoped properties i.e. a single Properties file with a rule based properties.
 
 Version 1.6 - Distributed, durable, observable collections, List, Set and Map.
@@ -64,18 +143,16 @@ Version 0.1 - Can read/write all basic data types. 26 M/second (max) multi-threa
 
 It uses memory mapped file to store "excerpts" of a "chronicle"  Initially it only supports an indexed array of data.
 
-===================================
-Throughput Test - FileLoggingMain
-===================================
+#Performance
+
+###Throughput Test - FileLoggingMain
 https://github.com/peter-lawrey/Java-Chronicle/blob/master/testing/src/main/java/com/higherfrequencytrading/chronicle/impl/FileLoggingMain.java
 
 This test logs one million lines of text using Chronicle compared with Logger.
 
 To log 1,000,000 messages took 0.234 seconds using Chronicle and 7.347 seconds using Logger
 
-===================================
-Throughput Test - IndexedChronicleThroughputMain
-===================================
+###Throughput Test - IndexedChronicleThroughputMain
 
 Note: These timings include Serialization.  This is important because many performance tests don't include Serialization even though it can be many times slower than the data store they are testing.
 
@@ -106,10 +183,8 @@ On a 4.6 GHz, i7-2600, 16 GB of memory, Fast SSD drive. Centos 5.7.
 
  The 14.1 M entries/sec is close to the maximum write speed of the SSD as each entry is an average of 28 bytes (with the index) => ~ 400 MB/s
 
- ===================================
- More compact Index for less than 4 GB of data
- ===================================
- https://github.com/peter-lawrey/Java-Chronicle/blob/master/testing/src/main/java/com/higherfrequencytrading/chronicle/impl/IntIndexedChronicleThroughputMain.java
+### More compact Index for less than 4 GB of data
+https://github.com/peter-lawrey/Java-Chronicle/blob/master/testing/src/main/java/com/higherfrequencytrading/chronicle/impl/IntIndexedChronicleThroughputMain.java
 
 on a 4.6 GHz, i7-2600
 Took 6.325 seconds to write/read 100,000,000 entries, rate was 15.8 M entries/sec - ByteBuffer (tmpfs)
@@ -117,6 +192,3 @@ Took 4.590 seconds to write/read 100,000,000 entries, rate was 21.8 M entries/se
 
 Took 7.352 seconds to write/read 100,000,000 entries, rate was 13.6 M entries/sec - ByteBuffer (ext4)
 Took 5.283 seconds to write/read 100,000,000 entries, rate was 18.9 M entries/sec - Using Unsafe (ext4)
-
-
-

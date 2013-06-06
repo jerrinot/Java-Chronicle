@@ -16,6 +16,8 @@
 
 package com.higherfrequencytrading.hiccup;
 
+import com.higherfrequencytrading.chronicle.tools.IOTools;
+
 import java.io.IOException;
 import java.net.BindException;
 import java.net.InetSocketAddress;
@@ -35,9 +37,9 @@ public class TcpHiccupMain {
     // total messages to send.
     static final int WARMUP = Integer.getInteger("warmup", 12000);
     // total messages to send.
-    static final int RUNS = Integer.getInteger("runs", 10000000);
+    static int RUNS = Integer.getInteger("runs", 1000000);
     // per milli-second. (note: every message is sent twice)
-    static final int RATE = Integer.getInteger("rate", 25);
+    static int RATE = Integer.getInteger("rate", 25);
     // busy waiting
     static boolean BUSY = Boolean.getBoolean("busy");
     // number of tests
@@ -47,31 +49,41 @@ public class TcpHiccupMain {
         String hostname = "localhost";
         int port = 65432;
 
-        for (int i = 0; i < TESTS; i++) {
-            for (int busy = 0; busy <= 1; busy++) {
-                BUSY = busy != 0;
+        switch (args.length) {
+            case 0:
+                for (int i = 0; i < TESTS; i++) {
+                    for (int busy = 0; busy <= 1; busy++) {
+                        BUSY = busy != 0;
 
-                switch (args.length) {
-                    case 0:
                         Thread thread = new Thread(new Acceptor(port + i));
                         thread.setDaemon(true);
                         thread.start();
                         new Sender(hostname, port + i).run();
                         thread.interrupt();
-                        break;
-
-                    case 1:
-                        new Acceptor(port).run();
-                        // only run one.
-                        return;
-
-                    case 2:
-                        new Sender(hostname, port).run();
-                        break;
+                    }
                 }
-            }
+                break;
+
+            case 1:
+                port = Integer.parseInt(args[0]);
+                new Acceptor(port).run();
+                // only run one.
+                return;
+
+            case 2:
+                hostname = args[0];
+                port = Integer.parseInt(args[1]);
+                for (int rate : new int[]{5, 10, 25}) {
+                    RATE = rate;
+                    RUNS = rate * 10000;
+                    for (int i = 0; i < TESTS; i++) {
+                        new Sender(hostname, port).run();
+                    }
+                }
+                break;
         }
     }
+
 
     static class Acceptor implements Runnable {
         private final ServerSocketChannel ssc;
@@ -110,8 +122,7 @@ public class TcpHiccupMain {
                         while (sc.read(bb) >= 0) {
                             bb.flip();
 //                            System.out.println("e "+bb.remaining());
-                            while (bb.remaining() > 0)
-                                sc.write(bb);
+                            IOTools.writeAllOrEOF(sc, bb);
                             bb.clear();
                         }
                     } catch (IOException e) {
@@ -152,15 +163,16 @@ public class TcpHiccupMain {
                 long start = System.nanoTime();
                 for (int i = 1; i <= WARMUP + RUNS; i++) {
                     long next = start + i * 1000000L / RATE;
-                    while (System.nanoTime() < next) ;
+                    do {
+                        /* busy wait */
+                    } while (System.nanoTime() < next);
                     time.clear();
                     // when it should have been sent, not when it was.
                     time.putInt(i);
                     time.putLong(next);
                     time.flip();
 //                    System.out.println("w " + time.getInt(0) + " " + time.remaining());
-                    while (time.remaining() > 0)
-                        sc.write(time);
+                    IOTools.writeAll(sc, time);
                 }
                 future.get();
 
@@ -182,13 +194,9 @@ public class TcpHiccupMain {
         @Override
         public void run() {
             System.err.println("... starting reader.");
-            Histogram warmup = new Histogram(1000, 10000);
-            Histogram[] histograms = new Histogram[5];
-            int scale = 1000;
-            for (int i = 0; i < histograms.length; i++) {
-                histograms[i] = new Histogram(1000, scale);
-                scale *= 10;
-            }
+            Histogram warmup = new Histogram(1000, 100, 7);
+            Histogram histo = new Histogram(1000, 100, 7);
+
             ByteBuffer time = ByteBuffer.allocateDirect(4096).order(ByteOrder.nativeOrder());
             try {
                 for (int i = 1; i <= WARMUP + RUNS; i++) {
@@ -202,9 +210,7 @@ public class TcpHiccupMain {
                     long next = time.getLong();
                     long took = System.nanoTime() - next;
                     if (i >= WARMUP)
-                        for (Histogram histogram : histograms) {
-                            histogram.sample(took);
-                        }
+                        histo.sample(took);
                     else
                         warmup.sample(took);
                     time.compact();
@@ -212,16 +218,16 @@ public class TcpHiccupMain {
 
                 StringBuilder heading = new StringBuilder("runs\trate\twarmup\tbusy");
                 StringBuilder values = new StringBuilder(RUNS + "\t" + RATE + "\t" + WARMUP + "\t" + BUSY);
-                for (double perc : new double[]{50, 90, 93, 99, 99.3, 99.9, 99.93, 99.99, 99.993, 99.999}) {
+                for (double perc : new double[]{50, 90, 99, 99.9, 99.99, 99.999}) {
                     double oneIn = 1.0 / (1 - perc / 100);
                     heading.append("\t").append(perc).append("%");
-                    long value = findPercentile(histograms, perc);
+                    long value = histo.percentile(perc);
                     values.append("\t").append(inNanos(value));
                     if (RUNS <= oneIn * oneIn)
                         break;
                 }
                 heading.append("\tworst");
-                long worst = findPercentile(histograms, 99.9999);
+                long worst = histo.percentile(99.9999);
                 values.append("\t").append(inNanos(worst)).append("\tmicro-seconds");
                 System.out.println(heading);
                 System.out.println(values);
@@ -237,16 +243,6 @@ public class TcpHiccupMain {
                     e.printStackTrace();
                 }
             }
-        }
-
-        private long findPercentile(Histogram[] histograms, double perc) {
-            long value = Long.MAX_VALUE;
-            for (Histogram histogram : histograms) {
-                value = histogram.percentile(perc);
-                if (value < Long.MAX_VALUE)
-                    break;
-            }
-            return value;
         }
 
         private String inNanos(long value) {

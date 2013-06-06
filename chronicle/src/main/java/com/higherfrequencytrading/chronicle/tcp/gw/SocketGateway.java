@@ -1,8 +1,25 @@
+/*
+ * Copyright 2013 Peter Lawrey
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *        http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.higherfrequencytrading.chronicle.tcp.gw;
 
 import com.higherfrequencytrading.chronicle.Chronicle;
 import com.higherfrequencytrading.chronicle.Excerpt;
 import com.higherfrequencytrading.chronicle.impl.IndexedChronicle;
+import com.higherfrequencytrading.chronicle.tools.IOTools;
 import com.higherfrequencytrading.chronicle.tools.WaitingRunnable;
 import com.higherfrequencytrading.chronicle.tools.WaitingThread;
 
@@ -40,7 +57,7 @@ public class SocketGateway implements WaitingRunnable, Closeable {
         Excerpt out = outbound.createExcerpt();
         out.index(out.size());
         outboundReader = new GatewayEntryReader(out, true) {
-            ByteBuffer byteBuffer = ByteBuffer.allocateDirect(1 << 20);
+            final ByteBuffer byteBuffer = ByteBuffer.allocateDirect(1 << 20);
 
             @Override
             protected void onEntry(long writeTimeNS, long writeTimeMS, long readTimeMS, int length, char type, Excerpt excerpt) {
@@ -51,7 +68,7 @@ public class SocketGateway implements WaitingRunnable, Closeable {
                 excerpt.read(byteBuffer);
                 byteBuffer.flip();
                 try {
-                    while (socket.write(byteBuffer) > 0 && byteBuffer.remaining() > 0) ;
+                    IOTools.writeAll(socket, byteBuffer);
                 } catch (IOException e) {
                     inboundWriter.onException("Failed to write", e);
                 }

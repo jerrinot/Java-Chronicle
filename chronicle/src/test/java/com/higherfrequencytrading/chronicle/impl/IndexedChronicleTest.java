@@ -18,6 +18,7 @@ package com.higherfrequencytrading.chronicle.impl;
 
 import com.higherfrequencytrading.chronicle.Excerpt;
 import org.junit.Assert;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import java.io.File;
@@ -89,8 +90,8 @@ public class IndexedChronicleTest {
     @Test
     public void testCloseWithNullBuffers() throws IOException {
         String basePath = TMP + File.separator + "deleteme.ict";
-        IndexedChronicle tsc = new IndexedChronicle(basePath, 12);
         deleteOnExit(basePath);
+        IndexedChronicle tsc = new IndexedChronicle(basePath, 12);
 
         tsc.clear();
         Excerpt excerpt = tsc.createExcerpt();
@@ -99,10 +100,58 @@ public class IndexedChronicleTest {
             excerpt.writeByte(1);
             excerpt.finish();
         }
+        // used to throw NPE if you have finished already.
+        excerpt.close();
         tsc.close();
 
         tsc = new IndexedChronicle(basePath, 12);
-        tsc.close();
+        tsc.createExcerpt().close();
+        tsc.close(); // used to throw an exception.
+    }
+
+    @Test
+    @Ignore
+    public void testTimeTenMillion() throws IOException {
+        int repeats = 3;
+        for (int j = 0; j < repeats; j++) {
+            long start = System.nanoTime();
+            String basePath = TMP + File.separator + "testTimeTenMillion";
+            deleteOnExit(basePath);
+            int records = 10 * 1000 * 1000;
+            {
+                IndexedChronicle ic = new IndexedChronicle(basePath);
+                ic.useUnsafe(true);
+                ic.clear();
+                Excerpt excerpt = ic.createExcerpt();
+                for (int i = 1; i <= records; i++) {
+                    excerpt.startExcerpt(16);
+                    excerpt.writeLong(i);
+                    excerpt.writeDouble(i);
+                    excerpt.finish();
+                }
+                ic.close();
+            }
+            {
+                IndexedChronicle ic = new IndexedChronicle(basePath);
+                ic.useUnsafe(true);
+                Excerpt excerpt = ic.createExcerpt();
+                for (int i = 1; i <= records; i++) {
+                    boolean found = excerpt.nextIndex();
+                    if (!found)
+                        assertTrue(found);
+                    long l = excerpt.readLong();
+                    double d = excerpt.readDouble();
+                    if (l != i)
+                        assertEquals(i, l);
+                    if (d != i)
+                        assertEquals((double) i, d);
+                    excerpt.finish();
+                }
+                ic.close();
+            }
+            long time = System.nanoTime() - start;
+            System.out.printf("Time taken %,d ms", time / 1000000);
+        }
     }
 
 
@@ -114,11 +163,9 @@ public class IndexedChronicleTest {
     @Test
     public void test_boolean() throws Exception {
         String testPath = TMP + File.separator + "chroncle-bool-test";
+        deleteOnExit(testPath);
         IndexedChronicle tsc = new IndexedChronicle(testPath, 12);
         tsc.useUnsafe(false);
-        deleteOnExit(testPath);
-
-        tsc.clear();
 
         Excerpt excerpt = tsc.createExcerpt();
         excerpt.startExcerpt(2);

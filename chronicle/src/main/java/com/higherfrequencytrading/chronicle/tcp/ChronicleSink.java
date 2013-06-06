@@ -13,12 +13,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package com.higherfrequencytrading.chronicle.tcp;
 
 import com.higherfrequencytrading.chronicle.Chronicle;
 import com.higherfrequencytrading.chronicle.Excerpt;
 import com.higherfrequencytrading.chronicle.ExcerptListener;
 import com.higherfrequencytrading.chronicle.impl.IndexedChronicle;
+import com.higherfrequencytrading.chronicle.tools.IOTools;
 
 import java.io.Closeable;
 import java.io.EOFException;
@@ -100,13 +102,15 @@ public class ChronicleSink implements Closeable {
         }
 
         private SocketChannel createConnection() {
-            while (!closed) {
+            if (closed) {
+                return null;
+            }
+            do {
                 try {
                     SocketChannel sc = SocketChannel.open(address);
                     ByteBuffer bb = ByteBuffer.allocate(8);
                     bb.putLong(0, chronicle.size());
-                    while (bb.remaining() > 0 && sc.write(bb) > 0) ;
-                    if (bb.remaining() > 0) throw new EOFException();
+                    IOTools.writeAllOrEOF(sc, bb);
                     return sc;
 
                 } catch (IOException e) {
@@ -115,38 +119,41 @@ public class ChronicleSink implements Closeable {
                     else if (logger.isLoggable(Level.INFO))
                         logger.log(Level.INFO, "Failed to connect to " + address + " retrying " + e);
                 }
-            }
+            } while (!closed);
             return null;
         }
 
         private void readNextExcerpt(SocketChannel sc) {
             ByteBuffer bb = TcpUtil.createBuffer(1, chronicle); // minimum size
             try {
-                while (!closed) {
-                    readHeader(sc, bb);
-                    long index = bb.getLong(0);
-                    long size = bb.getInt(8);
-                    if (index != chronicle.size())
-                        throw new StreamCorruptedException("Expected index " + chronicle.size() + " but got " + index);
-                    if (size > Integer.MAX_VALUE || size < 0)
-                        throw new StreamCorruptedException("size was " + size);
+                if (!closed) {
+                    do {
+                        readHeader(sc, bb);
+                        long index = bb.getLong(0);
+                        long size = bb.getInt(8);
+                        if (index != chronicle.size())
+                            throw new StreamCorruptedException("Expected index " + chronicle.size() + " but got " + index);
+                        if (size > Integer.MAX_VALUE || size < 0)
+                            throw new StreamCorruptedException("size was " + size);
 
-                    excerpt.startExcerpt((int) size);
-                    // perform a progressive copy of data.
-                    long remaining = size;
-                    bb.position(0);
-                    while (remaining > 0) {
-                        int size2 = (int) Math.min(bb.capacity(), remaining);
-                        bb.limit(size2);
-                        if (sc.read(bb) < 0) throw new EOFException();
-                        bb.flip();
-                        remaining -= bb.remaining();
-                        excerpt.write(bb);
-                    }
-                    excerpt.finish();
+                        excerpt.startExcerpt((int) size);
+                        // perform a progressive copy of data.
+                        long remaining = size;
+                        bb.position(0);
+                        while (remaining > 0) {
+                            int size2 = (int) Math.min(bb.capacity(), remaining);
+                            bb.limit(size2);
+                            if (sc.read(bb) < 0)
+                                throw new EOFException();
+                            bb.flip();
+                            remaining -= bb.remaining();
+                            excerpt.write(bb);
+                        }
+                        excerpt.finish();
 
-                    excerpt.index(index);
-                    listener.onExcerpt(excerpt);
+                        excerpt.index(index);
+                        listener.onExcerpt(excerpt);
+                    } while (!closed);
                 }
             } catch (IOException e) {
                 if (!closed)
@@ -162,8 +169,7 @@ public class ChronicleSink implements Closeable {
         private void readHeader(SocketChannel sc, ByteBuffer bb) throws IOException {
             bb.position(0);
             bb.limit(TcpUtil.HEADER_SIZE);
-            while (bb.remaining() > 0 && sc.read(bb) > 0) ;
-            if (bb.remaining() > 0) throw new EOFException();
+            IOTools.readFullyOrEOF(sc, bb);
         }
     }
 

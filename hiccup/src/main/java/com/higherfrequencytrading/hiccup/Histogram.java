@@ -16,59 +16,108 @@
 
 package com.higherfrequencytrading.hiccup;
 
+import java.util.Arrays;
+
 /**
  * @author peter.lawrey
  */
 public class Histogram {
-    private final int buckets, resolution;
-    private final int count[];
+    private final int buckets;
+    private final int resolution;
+    private final int ordersOfMagnitude;
+    private final int count[][];
     private int underflow = 0, overflow = 0;
     private long totalCount = 0;
+    private long maximum = 0;
 
-    public Histogram(int buckets, int resolution) {
+    public Histogram(int buckets, int resolution, int ordersOfMagnitude) {
         this.buckets = buckets;
         this.resolution = resolution;
-        count = new int[buckets];
+        this.ordersOfMagnitude = ordersOfMagnitude;
+        count = new int[ordersOfMagnitude][buckets];
+    }
+
+    public static Histogram add(Histogram... histograms) {
+        int buckets = histograms[0].buckets;
+        int resolution = histograms[0].resolution;
+        int ordersOfMagnitude = histograms[0].ordersOfMagnitude;
+        for (Histogram histogram : histograms) {
+            assert buckets == histogram.buckets;
+            assert resolution == histogram.resolution;
+            assert ordersOfMagnitude == histogram.ordersOfMagnitude;
+        }
+        Histogram ret = new Histogram(buckets, resolution, ordersOfMagnitude);
+        for (Histogram histogram : histograms) {
+            for (int i = 0; i < ordersOfMagnitude; i++) {
+                for (int j = 0; j < buckets; j++)
+                    ret.count[i][j] += histogram.count[i][j];
+            }
+            ret.overflow += histogram.overflow;
+            ret.underflow += histogram.underflow;
+            ret.totalCount += histogram.totalCount;
+        }
+        long total2 = ret.underflow + ret.overflow;
+        for (int i = 0; i < ordersOfMagnitude; i++)
+            for (int j = 0; j < buckets; j++)
+                total2 += ret.count[i][j];
+        if (ret.totalCount != total2)
+            throw new AssertionError(ret.totalCount + " != " + total2);
+        return ret;
     }
 
     public boolean sample(long sample) {
         totalCount++;
-        long bucket = ((sample + resolution / 2) / resolution);
         if (sample < 0) {
             underflow++;
             return false;
-        } else if (bucket >= buckets) {
+        }
+        if (sample > maximum)
+            maximum = sample;
+        long bucket = ((sample + resolution / 2) / resolution);
+        int order = 0;
+        while (bucket >= buckets && order < ordersOfMagnitude - 1) {
+            bucket /= 10;
+            order++;
+        }
+        if (bucket >= buckets) {
             overflow++;
             return false;
         }
-        count[((int) bucket)]++;
+        count[order][((int) bucket)]++;
         return true;
     }
 
     public long percentile(double percentile) {
         long searchCount = (long) (totalCount * percentile / 100);
-        // forward search is faster
-        if (searchCount < totalCount * 3 / 4) {
-            searchCount -= underflow;
-            if (searchCount <= 0)
-                return Long.MIN_VALUE;
-            for (int i = 0; i < buckets; i++) {
-                searchCount -= count[i];
-                if (searchCount <= 0)
-                    return (long) i * resolution;
-            }
-            return Long.MAX_VALUE;
-        } else {
-            searchCount = totalCount - searchCount;
-            searchCount -= overflow;
-            if (searchCount <= 0)
-                return Long.MAX_VALUE;
+        searchCount = totalCount - searchCount;
+        if (percentile == 100)
+            searchCount = 1;
+        searchCount -= overflow;
+        if (searchCount <= 0)
+            return maximum;
+
+        int order;
+        for (order = ordersOfMagnitude - 1; order >= 0; order--) {
             for (int i = buckets - 1; i >= 0; i--) {
-                searchCount -= count[i];
-                if (searchCount <= 0)
-                    return (long) i * resolution;
+                searchCount -= count[order][i];
+                if (searchCount <= 0) {
+                    long l = (long) i * resolution;
+                    for (int j = 0; j < order; j++)
+                        l *= 10;
+                    return l;
+                }
             }
-            return Long.MIN_VALUE;
         }
+        return Long.MIN_VALUE;
+    }
+
+    public long count() {
+        return totalCount;
+    }
+
+    public void clear() {
+        totalCount = underflow = overflow = 0;
+        for (int[] ints : count)
+            Arrays.fill(ints, 0);
     }
 }

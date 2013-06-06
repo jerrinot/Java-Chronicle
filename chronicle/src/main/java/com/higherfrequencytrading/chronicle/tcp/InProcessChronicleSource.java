@@ -20,6 +20,7 @@ import com.higherfrequencytrading.chronicle.Chronicle;
 import com.higherfrequencytrading.chronicle.EnumeratedMarshaller;
 import com.higherfrequencytrading.chronicle.Excerpt;
 import com.higherfrequencytrading.chronicle.impl.WrappedExcerpt;
+import com.higherfrequencytrading.chronicle.tools.IOTools;
 
 import java.io.EOFException;
 import java.io.IOException;
@@ -43,7 +44,7 @@ import java.util.logging.Logger;
  * @author peter.lawrey
  */
 public class InProcessChronicleSource implements Chronicle {
-    static final int IN_SYNC_LEN = -1;
+    static final int IN_SYNC_LEN = -128;
     static final long HEARTBEAT_INTERVAL_MS = 2500;
 
     private static final int MAX_MESSAGE = 128;
@@ -66,6 +67,11 @@ public class InProcessChronicleSource implements Chronicle {
         logger = Logger.getLogger(getClass().getName() + "." + name);
         service = Executors.newCachedThreadPool(new NamedThreadFactory(name));
         service.execute(new Acceptor());
+    }
+
+    @Override
+    public void multiThreaded(boolean multiThreaded) {
+        chronicle.multiThreaded(multiThreaded);
     }
 
     public void setTcpNoDelay(Boolean tcpNoDelay) {
@@ -116,11 +122,11 @@ public class InProcessChronicleSource implements Chronicle {
                     while (!excerpt.index(index)) {
 //                        System.out.println("Waiting for " + index);
                         long now = System.currentTimeMillis();
-                        if (sendInSync <= now) {
+                        if (sendInSync <= now && !first) {
                             bb.clear();
                             bb.putInt(IN_SYNC_LEN);
                             bb.flip();
-                            while (bb.remaining() > 0 && socket.write(bb) > 0) ;
+                            IOTools.writeAll(socket, bb);
                             sendInSync = now + HEARTBEAT_INTERVAL_MS;
                         }
                         pause();
@@ -132,7 +138,7 @@ public class InProcessChronicleSource implements Chronicle {
 
                     bb.clear();
                     if (first) {
-//                        System.out.println("wi "+index);
+//                        System.out.println("wi " + index);
                         bb.putLong(index);
                         first = false;
                         remaining = size + TcpUtil.HEADER_SIZE;
@@ -149,7 +155,7 @@ public class InProcessChronicleSource implements Chronicle {
                             bb.flip();
 //                        System.out.println("w " + ChronicleTools.asString(bb));
                             remaining -= bb.remaining();
-                            while (bb.remaining() > 0 && socket.write(bb) > 0) ;
+                            IOTools.writeAll(socket, bb);
                         }
                     } else {
                         bb.limit(remaining);
@@ -170,7 +176,7 @@ public class InProcessChronicleSource implements Chronicle {
 
                         bb.flip();
 //                        System.out.println("W " + size + " wb " + bb);
-                        while (bb.remaining() > 0 && socket.write(bb) > 0) ;
+                        IOTools.writeAll(socket, bb);
                     }
                     if (bb.remaining() > 0) throw new EOFException("Failed to send index=" + index);
                     index++;
@@ -179,17 +185,24 @@ public class InProcessChronicleSource implements Chronicle {
 //                        System.out.println(System.currentTimeMillis() + ": wrote " + index);
                 }
             } catch (IOException e) {
-                if (!closed)
-                    logger.log(Level.INFO, "Connect " + socket + " died", e);
+                if (!closed) {
+                    String msg = e.getMessage();
+                    if (msg != null &&
+                            (msg.contains("reset by peer") || msg.contains("Broken pipe")
+                                    || msg.contains("was aborted by")))
+                        logger.log(Level.INFO, "Connect " + socket + " closed from the other end " + e);
+                    else
+                        logger.log(Level.INFO, "Connect " + socket + " died", e);
+                }
             }
         }
 
         private long readIndex(SocketChannel socket) throws IOException {
             ByteBuffer bb = ByteBuffer.allocate(8);
-            while (bb.remaining() > 0 && socket.read(bb) > 0) ;
-            if (bb.remaining() > 0) throw new EOFException();
+            IOTools.readFullyOrEOF(socket, bb);
             return bb.getLong(0);
         }
+
     }
 
     private final Object notifier = new Object();

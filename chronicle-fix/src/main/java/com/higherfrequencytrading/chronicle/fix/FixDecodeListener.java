@@ -13,13 +13,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+package com.higherfrequencytrading.chronicle.fix;
 
-package com.higherfrequencytrading.chronicle.tcp;
+import com.higherfrequencytrading.chronicle.Excerpt;
 
 /**
  * @author peter.lawrey
- * @deprecated Using com.higherfrequencytrading.chronicle.ExcerptListener to be removed in version 1.8.
  */
-@Deprecated
-public interface ExcerptListener extends com.higherfrequencytrading.chronicle.ExcerptListener {
+public interface FixDecodeListener {
+    public void onField(int fid, Excerpt value);
+
+    public void onEndOfMessage();
+
+    public void onEndOfBatch();
 }

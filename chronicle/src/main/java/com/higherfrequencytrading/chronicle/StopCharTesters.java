@@ -13,13 +13,25 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package com.higherfrequencytrading.chronicle;
 
 /**
  * @author peter.lawrey
  */
-public enum StopCharTesters {
-    ;
+public enum StopCharTesters implements StopCharTester {
+    CONTROL_STOP {
+        @Override
+        public boolean isStopChar(int ch) {
+            return ch < ' ';
+        }
+    },
+    FIX_TEXT {
+        @Override
+        public boolean isStopChar(int ch) {
+            return ch <= 1;
+        }
+    };
 
     public static StopCharTester forChars(CharSequence sequence) {
         if (sequence.length() == 1)
